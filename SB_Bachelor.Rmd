@@ -1,0 +1,155 @@
+---
+title: "Beiers_Bachelorette"
+author: "Sophie Beiers"
+date: "11/15/2017"
+output: pdf_document
+---
+
+```{r setup, include = FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+setwd("~/Dropbox/QMSS/Data Analysis/Labs/Lab 5")
+library(tidyverse)
+library(data.table)
+library(car)
+library(QMSS)
+```
+# Data and Recoding Variables
+This data came from FiveThirtyEight: https://github.com/fivethirtyeight/data/tree/master/bachelorette. The dataset contains 33 seasons of the popular show, "The Bachelor/Bachelorette" as well as information about each candidate's experience: when he/she got eliminated, whether he/she got the "first impression rose," how many dates (group and one-on-one dates) he/she went on, and ultimately, who "won" the season. 
+```{r, message = FALSE}
+d <- read.csv("bachelorette.csv")
+da <- apply(d, 2, function(x) {x <- recode(x, " 'ED' = 'E'; 'EU' = 'E'; 'EQ' = 'E'; 'EF' = 'E' " ); x}) 
+# treat all eliminations the same
+da <- as.data.frame(da)
+#colSums(subd == 'SEASON')  # tells me there are 33 seasons represented
+
+# Calculate Winner
+da$win10 <- ifelse(da$ELIMINATION.10 == "W", 1, 0) # "winners" of show
+da$win9 <- ifelse(da$ELIMINATION.9 == "W", 1, 0) # "winners" of show who won a week early
+da$win8 <- ifelse(da$ELIMINATION.8 == "W", 1, 0) # etc.
+da$win7 <- ifelse(da$ELIMINATION.7 == "W", 1, 0)
+da$win6 <- ifelse(da$ELIMINATION.6 == "W", 1, 0)
+da$winner <- rowSums(da == "W")
+
+# Dates
+da$firstdate <- ifelse(da$DATES.2 == "D1", 1, 0) # who got the first one-on-one date, yes or no
+da$manydates <- rowSums(da == 'D1') # sum of how many one-on-one dates received
+
+# Rose
+da$firstrose <- ifelse(da$ELIMINATION.1 == "R1", 1, 0) # did contestant get first impression rose or not
+
+# Show Type
+da$ette <- ifelse(da$SHOW == "Bachelorette", 1, 0) # 0 if Bachelor
+
+# Subset data
+subd <- filter(da[-1, ], ELIMINATION.1 != "E") # gets rid of contestants that left night one
+subd <- subset(subd, SEASON != 'SEASON') # gets rid of rows that were titles
+#write_excel_csv(subd, "~/Dropbox/QMSS/Data Analysis/Labs/Lab 5/bach.csv") # download
+```
+# 1. Multiple Linear Probability Model  
+ 
+After subsetting the bachelor dataset to only include contestants who weren't booted off during the first night, I ran a linear probability model to see whether having the very first one-on-one date, having multiple one-on-one dates and getting the "first impression rose" (a bachelor tradition which involves keeping one contestant "safe" for week 2 purely based the Bachelor/Bachelorette's first impression) would be able to predict how likely a contestant is to win. I hypothesized that the more one-on-one dates a contestant goes on, the more likely he/she is to "win," and that getting the first impression rose and obtaining the first one-on-one date would have a negative relationship to "winning" since first impressions are often wrong. 
+```{r}
+summary(lp1 <- lm(winner ~ firstdate + manydates + firstrose, data = subd))
+```
+From the model above, we can see that on average, going on the first one-on-one date decreases a contestant's chances of winning by 12.5 percentage points (p < 0.01) net of the other factors. This is in line with what I guessed -- maybe the bachelor/bachelorette chooses someone they are not very sure of as their first one-on-one date to see if there's a connection. Second, the more one-on-one dates a contestant goes on (0 - 5), chances of winning increases by 8.8 percentage points on average (p < 0.01) net of the other factors. This makes sense, because the bachelor/bachelorette likely chooses contestants he/she likes the most to go on the most one-on-one dates. Lastly, getting the first impression rose increases a contestant's chances of winning by 2.2 percentage points net of the other factors, contrary to what I hypothesized, but this finding is not significant -- maybe contestants have strong intuition, after all? 
+
+The adjusted R-squared value tells us that 33% of the variance in winning the Bachelor can be explained by this model. There's clearly a lot more at play than we've estimated thus far (and likely have access to). 
+
+I then wanted to see whether it matters if the show was the Bachelor (indicating a single man being pursued by 30 women) or the Bachelorette (indicating a single woman being pursued by 30 men) changed any of my estimations. This was mainly exploratory, but my hypothesis is that the gender of the "main character" will not matter, and I will have very similar results to my model above. 
+```{r}
+summary(lp1 <- lm(winner ~ firstdate + manydates + firstrose, data = subd, subset = ette == 1))
+```
+Surprisingly, when we subsetted the data to include only information from the Bachelorette, our model gained explanatory power (from Rsquared values of 0.33 to 0.35) and the first impression rose became a significant predictor (p < 0.05) of who won the show. Men who received the first impression rose were 12.7 percentage points more likely to win, net of other factors. Maybe women have better first instincts than men? :) I continue to use the subset of data from the Bachelorette below. 
+
+# 2. Multiple (binary) Logistic Model.
+ 
+First, I created a new variable: a count of how many roses a contestant won on a date. Normally, during a "rose ceremony," contestants are either eliminated (E) or receive a rose. In this case, the roses (R) indicate contestants who received roses outside of the normal rose ceremony, likely on a group or one-on-one date. 
+```{r}
+subd$manyroses <- rowSums(subd == "R")
+table(subd$manyroses)
+```
+My hypotheses are: 
+  + getting the first one-on-one date will decrease one's logit of winning 
+  + the more dates a contestant has, the higher his logit of winning 
+  + the first impression rose will increase a contestant's logit of winning
+  + the more roses a contestant receives increases his logit of winning
+```{r}
+lg1 = glm(winner ~ firstdate + manydates + firstrose + manyroses, data = subd, subset = ette == 1, family = binomial)
+summary(lg1)
+```
+I was incorrect about a few of my hypotheses. It looks like the only significant predictor in our model was how many one-on-one dates a contestant went on, overall. For every one more date a contestant on the Bachelorette had, his logit of winning increased by 2.01 (p < 0.01). The other factors were not significant, and my idea about contestants who have more roses having a higher logit of winning turned out to be the opposite: every one more rose a contestant in the Bachelorette had, his logit of winning actually decreased by 0.51, though as stated, this was not significant. 
+
+I wanted to next try the logistic regression for contestants on the Bachelor, rather than the Bachelorette to see if there would be any differences between the sexes.
+```{r}
+lg2 = glm(winner ~ firstdate + manydates + firstrose + manyroses, data = subd, subset = ette == 0, family = binomial)
+summary(lg2)
+
+```
+It looks like the only significant predictor of logit of winning in this model is, again, how many one-on-one dates a contestant went on. In this case, every one more date a contestant went on, her logit of winning increased by 2.07 net of the other variables. Contrary to what we saw in our Bachelorette dataset, a contestant on the Bachelor who receives the first impression rose actually decreases her logit of winning by 0.99. 
+
+Lastly, I run a logistic regression on the entire dataset, not subsetting for type of show (Bachelor v Bachelorette).
+```{r}
+lg3 <- glm(winner ~ firstdate + manydates + firstrose + manyroses, data = subd, family = binomial)
+summary(lg3)
+```
+It turns out that this model looks quite similar to the others. When comparing the AICs, though, it looks like our first model was the best fitting because it has the lowest AIC value (AIC of 45 v. 70 and 111, respectively).
+
+## 3. Odds Ratios
+To easier interpret the second logistic model, we can use an odds-ratio interpretation. The below coefficients represent by how much a contestant's odds of winning the Bachelor increased or decreased. 
+```{r}
+exp(coef(lg2))
+
+exp(confint(lg2))
+```
+Since "manydates" was our only significant predictive element in the model, we can start there. Using the odds-ratio model, we can say that as a contestant's number of dates increases by one, her odds of winning also go up by 7.97, controlling for the other variables in this model. The odds of winning the Bachelor go up by ((7.96 - 1)100), which is 696%, if a contestant got the highest amount of dates possible (that's a lot!). This represents a proportionate increase, however, rather than an absolute increase. Though no longer significant, we can interpret "firstdate" as: if a contestant received the first one-on-one date, her odds of winning are 0.58 smaller net of the other factors in the model. The odds of winning the Bachelor goes down by ((0.58 - 1)*100), or -42%. 
+
+# 4. Predicted Probabilities
+To begin, I run analysis to see what the "typical" (median) Bachelor/ette contestant experiences. It looks like the typical contestant goes on 0 one-on-one dates and gets 0 date roses (that's sad). However, on average (mean), contestants get one one-on-one date and one half (which I'll call one) date rose, so I'll use those numbers as the "typical" contestant's experience below. 
+```{r}
+# Typical one-on-one date experience
+table(subd$manydates)
+median(subd$manydates)
+mean(subd$manydates)
+
+# Typical date rose experience 
+table(subd$manyroses)
+median(subd$manyroses)
+mean(subd$manyroses)
+```
+First, I predicted the probability for a contestant who didn't get the first date, had 0 one-on-one dates, didn't get the first rose and only got one date rose.
+
+Then, I predicted the probability for a contestant who had a very lucky experience: got the first date, had four dates total, got the first impression rose and got four date roses.
+
+Lastly, I predicted the probability of winning for a contestant who had a fairly average experience (had one one-on-one date, got one date rose) but also got the first impression rose and the first date. 
+```{r}
+predict(lg3, type = "response", 
+        newdata = data.frame(firstdate = c(0, 1, 1), manydates = c(0, 4, 1), 
+                             firstrose = c(0, 1, 1), manyroses = c(1, 4, 1)))
+
+```
+It looks like, from our first attempt at prediction, candidates in the second prediction column had the best predicted probability of winning the show. For a contestant who got the first date, had four one-on-one dates total, got the first impression rose AND got four date roses has a predicted probability of 5.06% of winning the show. The other two "types" of candidates didn't do so well -- candidates who have an average experience with a few added benefits (first impression rose and a date rose) still only have a predicted probability of winning the show of 0.06%. These small numbers do seem a little low to me, so maybe there's something weird going on because there are so few contestants in some of these categories. 
+
+```{r}
+# Tried again, this time with all possibilities
+pred <- with(subd, expand.grid( 
+  firstdate = sort(unique(firstdate)),
+  manydates = mean(manydates),
+  manyroses = mean(manyroses),
+  firstrose = sort(unique(firstrose))))
+
+pred1 <- cbind(pred, predicted.prob = predict(lg3, type = "response", newdata = pred))
+print(pred1, digits = 3)
+```
+The second dataframe I created above shows that once again, the average candidate experience doesn't bode well toward winning. I again wonder if small n's are affecting these analyses, since I'd expect higher numbers in a few of these instances. 
+Finally, I visualized the predicted probabilities for number of one-on-one dates by whether the candidate gets a first impression rose.
+```{r}
+library(visreg)
+plot <- visreg(fit = lg3, xvar = "manydates", by = "firstrose",
+              partial = F, overlay = T, 
+              xlab = "Number of One-on-One Dates", 
+              ylab = "Predicted probability", 
+              scale = "response",
+              type = "conditional",
+              alpha = .05) 
+```
+
